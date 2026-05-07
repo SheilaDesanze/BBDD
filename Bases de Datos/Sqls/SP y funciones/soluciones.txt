@@ -1,0 +1,92 @@
+
+--4
+create function f_valor_oro_moneda (@moneda char(2)) returns decimal(18,3)
+BEGIN
+declare @aux decimal(18,3);
+set @aux=(select count(*) from moneda m where m.id=@moneda);
+--select @aux=count(*) from moneda m where m.id=@moneda; 
+ IF(@aux=0) set @aux=-1;
+ else select @aux=m.valorOro from moneda m where m.id=@moneda; 
+return @aux;
+END
+
+select dbo.f_valor_oro_moneda('MM') as valorOro
+select dbo.f_valor_oro_moneda('UY') as valorOro
+
+
+--5
+create function f_cuenta_todos_bancos() returns table as
+return(
+	select p.pasaporte,p.nombre
+			from Persona p
+			where not exists
+					(select 1
+					 from banco b
+					 where not exists
+								( select 1
+									from cuenta c
+									where p.pasaporte=c.idPersona and b.id=c.idBanco))
+)
+
+select *
+from f_cuenta_todos_bancos()
+
+--6
+create procedure p_3_cuentas_dolares as
+
+select p.* 
+from persona p inner join
+				(select p.pasaporte, count(*) cantidadCuentas
+				from persona p inner join cuenta c on p.pasaporte=c.idPersona inner join banco b on c.idBanco=b.id
+				where c.idMoneda='US' and b.pais not in ('Argentina')
+				group by p.pasaporte
+				having count(*) > 2) as tres 
+on p.pasaporte=tres.pasaporte
+
+
+exec p_3_cuentas_dolares
+
+--7
+create procedure p_cuentas_pasaporte (@pasaporte_parametro char(15)) as
+begin
+declare @aux integer;
+select @aux=count(*) from persona where pasaporte=@pasaporte_parametro;
+if (@aux>0) select c.* from cuenta c where c.idPersona=@pasaporte_parametro;
+else raiserror ('No existe el pasaporte recibido por parámetro',11,1);
+end
+
+exec p_cuentas_pasaporte 16
+exec p_cuentas_pasaporte 3
+
+--8 (Primero debe crearse la tabla banco_respaldo)
+create trigger t_baja_banco_moneda_ext on banco INSTEAD OF delete
+as
+BEGIN
+if not exists (select * from deleted d inner join opera o 
+on d.id=o.idBanco where o.idMoneda = 'AR')
+BEGIN
+		insert into banco_respaldo select * from deleted;
+		delete from banco where id in (select id from deleted)
+END
+else RAISERROR ('El banco opera con Pesos Argentinos. No puede eliminarse', 11, 50000);
+END
+
+--9
+create trigger t_update_moneda on moneda for update
+as
+begin
+declare @idMonedaViejo varchar(2);
+declare @idMonedaNuevo varchar(2);
+
+select @idMonedaViejo=d.id from deleted d;
+select @idMonedaNuevo=i.id from inserted i;
+
+update opera set idMoneda=@idMonedaNuevo where idMoneda=@idMonedaViejo;
+update cuenta set idMoneda=@idMonedaNuevo where idMoneda=@idMonedaViejo;
+
+end
+
+--update moneda set id='UR' where id='UY'
+
+
+
